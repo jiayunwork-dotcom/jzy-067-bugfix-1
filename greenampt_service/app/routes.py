@@ -59,6 +59,19 @@ def _float_or_none(body: dict, name: str):
     return fv
 
 
+def _resolve_ponded_flag(body: dict[str, Any], has_rainfall: bool) -> bool:
+    """解析「是否已积水」开关，缺省值随降雨强度是否在场而定。
+
+    * 显式给了 already_ponded（true/false）：以声明为准；
+    * 给了降雨强度却没声明：按未积水处理，交给降雨分段判定
+      （i ≤ Ks 不积水，i > Ks 先自由后积水）；
+    * 降雨强度、声明都不给：维持默认按地表已积水处理。
+    """
+    if "already_ponded" in body and body["already_ponded"] is not None:
+        return _as_bool(body["already_ponded"], "already_ponded", True)
+    return not has_rainfall
+
+
 # ---------- 健康检查 ----------
 @api.get("/health")
 def health():
@@ -76,7 +89,7 @@ def infiltration():
     if isinstance(t, bool) or not isinstance(t, (int, float)):
         raise ValidationError("历时 t 必须是非负数值")
     rainfall_rate = _float_or_none(body, "rainfall_rate")
-    already_ponded = _as_bool(body.get("already_ponded"), "already_ponded", True)
+    already_ponded = _resolve_ponded_flag(body, rainfall_rate is not None)
     result = infiltration_at(
         params,
         float(t),
@@ -154,12 +167,13 @@ def submit_hydrograph():
     if t_end is None:
         raise ValidationError("必须提供历时上限 t_end")
     n_points = body.get("n_points", 101)
+    rainfall_rate = _float_or_none(body, "rainfall_rate")
     spec = HydrographSpec(
         params=params,
         t_end=float(t_end) if isinstance(t_end, (int, float)) and not isinstance(t_end, bool) else t_end,
         n_points=n_points,
-        rainfall_rate=_float_or_none(body, "rainfall_rate"),
-        already_ponded=_as_bool(body.get("already_ponded"), "already_ponded", True),
+        rainfall_rate=rainfall_rate,
+        already_ponded=_resolve_ponded_flag(body, rainfall_rate is not None),
     )
     job = current_app.extensions["job_manager"].submit(spec)
     return jsonify(job.public_view()), 202

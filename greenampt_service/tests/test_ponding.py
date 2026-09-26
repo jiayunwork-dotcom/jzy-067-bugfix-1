@@ -83,6 +83,25 @@ def test_already_ponded_uses_ponded_equation_from_zero(loam):
     assert out["F"] > loam.ks * 1.0
 
 
+def test_unified_entry_rainfall_without_flag_matches_explicit_free(loam):
+    # 统一入口：只给降雨强度（不显式声明积水）必须走降雨分段，
+    # 且与显式 already_ponded=False 的结果逐字段一致。
+    for i, t in [(0.5, 5.0), (3.0, 0.1), (3.0, 5.0)]:
+        implicit = infiltration_at(loam, t, rainfall_rate=i)
+        explicit = infiltration_at(
+            loam, t, rainfall_rate=i, already_ponded=False
+        )
+        assert implicit == explicit
+        assert implicit["phase"] == rainfall_infiltration_at(loam, t, i)["phase"]
+
+
+def test_unified_entry_neither_rain_nor_flag_defaults_ponded(loam):
+    # 两者都不给：维持按地表已积水处理的缺省行为。
+    out = infiltration_at(loam, 1.0)
+    assert out["phase"] == "ponded"
+    assert out["ponded"] is True
+
+
 def test_F_monotone_through_ponding(loam):
     i = 3.0
     tp = ponding_time(loam, i)["tp"]
