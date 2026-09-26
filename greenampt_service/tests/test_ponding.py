@@ -83,6 +83,31 @@ def test_already_ponded_uses_ponded_equation_from_zero(loam):
     assert out["F"] > loam.ks * 1.0
 
 
+def test_rainfall_without_flag_segments_like_explicit_false(loam):
+    # 回归：给了降雨强度、already_ponded 缺省（未声明）时，
+    # 必须与显式 already_ponded=False 走同一条降雨分段路，
+    # 不许缺省成「从零积水」把降雨强度丢掉。
+    for i in [0.5, 3.0]:  # 小雨（永不积水）与大雨（先自由后积水）
+        tp = ponding_time(loam, i)["tp"]
+        ts = [0.1, 1.0, 10.0] if tp is None else [0.5 * tp, tp, tp + 5.0]
+        for t in ts:
+            auto = infiltration_at(loam, t, rainfall_rate=i)
+            explicit = infiltration_at(
+                loam, t, rainfall_rate=i, already_ponded=False
+            )
+            assert auto == explicit
+            assert auto["phase"] == ("free" if tp is None or t < tp else "ponded")
+            if auto["phase"] == "free":
+                assert auto["F"] == pytest.approx(i * t)
+
+
+def test_no_rainfall_no_flag_defaults_to_ponded(loam):
+    # 降雨强度与开关都不给：维持原缺省，按地表已积水处理
+    out = infiltration_at(loam, 1.0)
+    assert out["phase"] == "ponded"
+    assert out["F"] > loam.ks * 1.0
+
+
 def test_F_monotone_through_ponding(loam):
     i = 3.0
     tp = ponding_time(loam, i)["tp"]

@@ -33,7 +33,9 @@ class HydrographSpec:
     t_end: float
     n_points: int
     rainfall_rate: float | None = None
-    already_ponded: bool = False
+    # 三态：True 从零积水 / False 强制按降雨分段 / None 未声明
+    # （未声明时由 infiltration_at 决定：有降雨按降雨，否则按已积水）
+    already_ponded: bool | None = None
 
     def __post_init__(self) -> None:
         # 输入校验在提交作业时就做，不进后台
@@ -49,7 +51,9 @@ class HydrographSpec:
             self.rainfall_rate = check_positive(
                 "rainfall_rate（降雨强度）", self.rainfall_rate
             )
-        if not isinstance(self.already_ponded, bool):
+        if self.already_ponded is not None and not isinstance(
+            self.already_ponded, bool
+        ):
             raise ValidationError("already_ponded 必须是布尔值")
 
 

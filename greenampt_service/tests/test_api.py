@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 
 def test_health(client):
     r = client.get("/health")
@@ -54,6 +56,109 @@ def test_infiltration_rainfall_piecewise(client):
     assert body["will_pond"] is True
     assert body["tp"] > 0
     assert body["phase"] in ("free", "ponded")
+
+
+# ---- 回归：带降雨强度、不声明 already_ponded 时必须按降雨分段 ----
+# 曾经的缺陷：路由层把 already_ponded 缺省成 True，降雨强度被静默丢弃，
+# 一律按「从零积水」解。以下用例钉住「不声明开关」与「显式不积水」
+# 两条路结果完全一致。
+
+SOIL = {"ks": 1.04, "psi": 6.0, "dtheta": 0.434}
+
+
+def _infiltration(client, **payload):
+    r = client.post("/api/infiltration", json=payload)
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()
+
+
+def test_light_rain_without_flag_never_ponds(client):
+    # 小雨 i < Ks：物理上永不积水，F = i·t，入渗率即降雨强度
+    i, t = 0.5, 5.0
+    body = _infiltration(client, **SOIL, t=t, rainfall_rate=i)
+    assert body["ponded"] is False
+    assert body["will_pond"] is False
+    assert body["phase"] == "free"
+    assert body["tp"] is None
+    assert body["F"] == pytest.approx(i * t)
+    assert body["f"] == pytest.approx(i)
+
+    # 与显式 already_ponded=false 的应答逐项一致
+    explicit = _infiltration(
+        client, **SOIL, t=t, rainfall_rate=i, already_ponded=False
+    )
+    assert body == explicit
+
+
+def test_heavy_rain_without_flag_free_then_ponded(client):
+    # 大雨 i > Ks：tp 前自由段 F = i·t，tp 后积水段，且与显式不积水一致
+    i = 3.0
+    tp = client.post(
+        "/api/ponding", json={**SOIL, "rainfall_rate": i}
+    ).get_json()["tp"]
+    assert tp > 0
+
+    early = _infiltration(client, **SOIL, t=0.5 * tp, rainfall_rate=i)
+    assert early["phase"] == "free"
+    assert early["ponded"] is False
+    assert early["F"] == pytest.approx(i * 0.5 * tp)
+    assert early["f"] == pytest.approx(i)
+    assert early["tp"] == pytest.approx(tp)
+
+    late = _infiltration(client, **SOIL, t=tp + 5.0, rainfall_rate=i)
+    assert late["phase"] == "ponded"
+    assert late["ponded"] is True
+    assert late["residual_within_tol"] is True
+    # 积水段累积入渗必大于同段自由外推 i·t 的 Ks 部分（吸力项作用），
+    # 且与显式不积水的应答逐项一致
+    for t in (0.5 * tp, tp, tp + 5.0):
+        auto = _infiltration(client, **SOIL, t=t, rainfall_rate=i)
+        explicit = _infiltration(
+            client, **SOIL, t=t, rainfall_rate=i, already_ponded=False
+        )
+        assert auto == explicit
+
+
+def test_explicit_ponded_true_still_ignores_rainfall(client):
+    # 显式声明已积水：即使带了降雨强度，也从零走积水隐式式
+    body = _infiltration(
+        client, **SOIL, t=1.0, rainfall_rate=3.0, already_ponded=True
+    )
+    assert body["phase"] == "ponded"
+    assert body["ponded"] is True
+    assert "tp" not in body
+    assert body["F"] > SOIL["ks"] * 1.0  # 吸力项作用
+
+
+def test_no_rainfall_no_flag_defaults_to_ponded(client):
+    # 既不给降雨强度也不声明开关：维持原缺省，按已积水处理
+    body = _infiltration(client, **SOIL, t=1.0)
+    assert body["phase"] == "ponded"
+    assert body["ponded"] is True
+    assert body["F"] > SOIL["ks"] * 1.0
+
+
+def test_hydrograph_rainfall_without_flag_segments(client):
+    # 点列作业同样：带降雨、不声明开关时必须分自由/积水两段
+    r = client.post("/api/hydrographs", json={
+        **SOIL, "t_end": 5.0, "n_points": 200, "rainfall_rate": 3.0,
+    })
+    assert r.status_code == 202
+    job_id = r.get_json()["job_id"]
+
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        body = client.get(f"/api/hydrographs/{job_id}").get_json()
+        if body["status"] == "completed":
+            break
+        time.sleep(0.02)
+    assert body["status"] == "completed"
+
+    phases = [p["phase"] for p in body["points"]]
+    assert phases[0] == "free"
+    assert phases[-1] == "ponded"
+    transitions = sum(1 for a, b in zip(phases, phases[1:]) if a != b)
+    assert transitions == 1
 
 
 def test_ponding_endpoint_no_pond(client):

@@ -39,7 +39,7 @@ def _resolve_soil(body: dict[str, Any]) -> SoilParameters:
         )
 
 
-def _as_bool(value: Any, name: str, default: bool) -> bool:
+def _as_bool(value: Any, name: str, default: bool | None) -> bool | None:
     if value is None:
         return default
     if not isinstance(value, bool):
@@ -76,7 +76,9 @@ def infiltration():
     if isinstance(t, bool) or not isinstance(t, (int, float)):
         raise ValidationError("历时 t 必须是非负数值")
     rainfall_rate = _float_or_none(body, "rainfall_rate")
-    already_ponded = _as_bool(body.get("already_ponded"), "already_ponded", True)
+    # 三态开关：客户端没传就是 None（未声明），绝不能缺省成 True——
+    # 否则带了降雨强度的请求会被静默按「从零积水」解，降雨形同虚设。
+    already_ponded = _as_bool(body.get("already_ponded"), "already_ponded", None)
     result = infiltration_at(
         params,
         float(t),
@@ -159,7 +161,7 @@ def submit_hydrograph():
         t_end=float(t_end) if isinstance(t_end, (int, float)) and not isinstance(t_end, bool) else t_end,
         n_points=n_points,
         rainfall_rate=_float_or_none(body, "rainfall_rate"),
-        already_ponded=_as_bool(body.get("already_ponded"), "already_ponded", True),
+        already_ponded=_as_bool(body.get("already_ponded"), "already_ponded", None),
     )
     job = current_app.extensions["job_manager"].submit(spec)
     return jsonify(job.public_view()), 202

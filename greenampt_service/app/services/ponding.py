@@ -145,15 +145,23 @@ def infiltration_at(
     t: float,
     *,
     rainfall_rate: float | None = None,
-    already_ponded: bool = False,
+    already_ponded: bool | None = None,
     tol: float = RESIDUAL_TOL,
 ) -> dict:
-    """统一入口：已声明积水走积水式；否则按降雨强度分段判定。
+    """统一入口：显式声明积水走积水式；否则给了降雨就按降雨分段。
 
-    * ``already_ponded=True``：从时刻零就走积水式（忽略降雨强度）；
-    * 给出 ``rainfall_rate``：先判积水时刻，再取对应段；
+    * ``already_ponded=True``（显式声明）：从时刻零就走积水式，
+      忽略降雨强度；
+    * 给出 ``rainfall_rate`` 且未显式声明已积水：先判积水时刻，
+      再取对应段（i ≤ Ks 永不积水；i > Ks 先自由后积水）；
     * 两者都不给：默认按地表已积水处理（保守、与模型核心一致）。
+
+    ``already_ponded`` 是三态：True / False / None（未声明）。
+    路由层在客户端没传这个开关时必须传 None——若缺省成 True，
+    降雨强度会被静默丢弃，一律按从零积水解（曾经的线上缺陷）。
     """
-    if already_ponded or rainfall_rate is None:
+    if already_ponded is True:
         return ponded_infiltration_at(params, t, tol=tol)
-    return rainfall_infiltration_at(params, t, rainfall_rate, tol=tol)
+    if rainfall_rate is not None:
+        return rainfall_infiltration_at(params, t, rainfall_rate, tol=tol)
+    return ponded_infiltration_at(params, t, tol=tol)

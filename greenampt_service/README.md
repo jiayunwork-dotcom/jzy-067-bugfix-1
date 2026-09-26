@@ -28,7 +28,9 @@ F − λ·ln(1 + F/λ) = Ks·t
 - `i > Ks`：先自由入渗 `F=i·t`，到 `tp = Fp/i = Ks·λ/[i·(i−Ks)]`
   （`Fp = Ks·λ/(i−Ks)`）开始积水，之后走时间平移的隐式积水式：
   `F − λ·ln(1+F/λ) = Ks·(t−tp) + Fp − λ·ln(1+Fp/λ)`。
-- 请求里声明 `already_ponded=true` 则从时刻零就走积水式。
+- 请求里声明 `already_ponded=true` 则从时刻零就走积水式（忽略降雨强度）；
+  给了 `rainfall_rate` 而不声明该开关时按降雨自动分段（与显式
+  `already_ponded=false` 完全一致）；两者都不给则缺省按地表已积水处理。
 
 单位自洽即可（如 Ks、ψ、F、f 用 cm/h，t 用 h），Δθ 无量纲。
 
